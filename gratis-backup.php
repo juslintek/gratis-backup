@@ -21,4 +21,7 @@ add_action('plugins_loaded', function () {
     if (defined('WP_CLI') && WP_CLI) {
         \WP_CLI::add_command('gratis-backup', \Gratis\Backup\CLI\BackupCommand::class);
     }
+
+    // Auto-snapshot before plugin/theme updates
+    \Gratis\Backup\PreUpdateSnapshot::init();
 });
