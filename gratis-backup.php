@@ -24,4 +24,5 @@ add_action('plugins_loaded', function () {
 
     // Auto-snapshot before plugin/theme updates
     \Gratis\Backup\PreUpdateSnapshot::init();
+    \Gratis\Backup\ScheduledBackup::init();
 });
