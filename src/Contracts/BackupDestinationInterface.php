@@ -1,8 +1,8 @@
 <?php declare(strict_types=1);
 namespace Gratis\Backup\Contracts;
 
-interface BackupDestinationInterface
-{
+interface BackupDestinationInterface {
+
     public function name(): string;
     public function write(string $path, \Generator $chunks): bool;
     public function exists(string $path): bool;

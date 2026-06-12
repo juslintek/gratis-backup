@@ -5,12 +5,11 @@ namespace Gratis\Backup;
  * Scheduled automatic backups via WP-Cron.
  * What UpdraftPlus charges $70/yr for (scheduled cloud backups). Free in Gratis.
  */
-final class ScheduledBackup
-{
+final class ScheduledBackup {
+
     private const CRON_HOOK = 'gratis_backup_scheduled';
 
-    public static function init(): void
-    {
+    public static function init(): void {
         add_action(self::CRON_HOOK, [__CLASS__, 'run']);
 
         $schedule = get_option('gratis_backup_schedule', 'daily');
@@ -27,8 +26,7 @@ final class ScheduledBackup
         });
     }
 
-    public static function run(): void
-    {
+    public static function run(): void {
         $dest = new Destination\LocalFilesystem();
         if (!$dest->isAvailable()) return;
 
@@ -49,14 +47,20 @@ final class ScheduledBackup
         self::rotate((int) get_option('gratis_backup_keep', 7));
     }
 
-    private static function rotate(int $keep): void
-    {
+    private static function rotate(int $keep): void {
         $dir = WP_CONTENT_DIR . '/gratis-backup-manifests';
-        if (!is_dir($dir)) return;
+        if (!is_dir($dir)) {
+            return;
+        }
         $files = glob($dir . '/*.json');
-        if (count($files) <= $keep) return;
+        if (count($files) <= $keep) {
+            return;
+        }
         sort($files);
         $toDelete = array_slice($files, 0, count($files) - $keep);
-        foreach ($toDelete as $f) @unlink($f);
+        foreach ($toDelete as $f) {
+            // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged, WordPress.WP.AlternativeFunctions.unlink_unlink
+            @unlink($f);
+        }
     }
 }

@@ -4,10 +4,9 @@ namespace Gratis\Backup;
 /**
  * Hooks into WordPress update process to create automatic snapshots.
  */
-final class PreUpdateSnapshot
-{
-    public static function init(): void
-    {
+final class PreUpdateSnapshot {
+
+    public static function init(): void {
         // Before plugin/theme updates
         add_filter('upgrader_pre_install', [__CLASS__, 'beforeUpdate'], 10, 2);
 
@@ -18,8 +17,7 @@ final class PreUpdateSnapshot
         add_action('gratis_cache_purge_all', [__CLASS__, 'beforePurge']);
     }
 
-    public static function beforeUpdate($response, array $hookExtra): mixed
-    {
+    public static function beforeUpdate($response, array $hookExtra): mixed {
         $type = $hookExtra['type'] ?? 'unknown';
         $action = $hookExtra['action'] ?? 'unknown';
 
@@ -41,14 +39,16 @@ final class PreUpdateSnapshot
                 ]);
             }
         } catch (\Throwable $e) {
-            // Never block updates due to backup failure
+            // Never block updates due to backup failure; record the reason for observers.
+            if (function_exists('do_action')) {
+                do_action('gratis_backup_snapshot_failed', $e->getMessage());
+            }
         }
 
         return $response;
     }
 
-    public static function afterUpdate($upgrader, array $hookExtra): void
-    {
+    public static function afterUpdate($upgrader, array $hookExtra): void {
         $type = $hookExtra['type'] ?? 'unknown';
         $plugins = $hookExtra['plugins'] ?? $hookExtra['themes'] ?? [];
 
@@ -60,8 +60,7 @@ final class PreUpdateSnapshot
         }
     }
 
-    public static function beforePurge(string $reason = ''): void
-    {
+    public static function beforePurge(string $reason = ''): void {
         // Only snapshot on significant purges, not routine ones
         if ($reason === 'cli' || $reason === 'admin-manual') {
             return; // Don't snapshot on manual purges

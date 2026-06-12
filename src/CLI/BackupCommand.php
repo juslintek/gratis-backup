@@ -7,8 +7,8 @@ use Gratis\Backup\Source\DatabaseSource;
 use Gratis\Backup\Source\DirectorySource;
 
 /** WP-CLI commands: wp gratis-backup <subcommand> */
-final class BackupCommand
-{
+final class BackupCommand {
+
     /**
      * Run a backup.
      *
@@ -25,13 +25,12 @@ final class BackupCommand
      *
      * @when after_wp_load
      */
-    public function run($args, $assoc_args): void
-    {
+    public function run($args, $assoc_args): void {
         $type = $assoc_args['type'] ?? 'full';
         $dest = new LocalFilesystem();
 
         if (!$dest->isAvailable()) {
-            \WP_CLI::error("Backup destination not writable.");
+            \WP_CLI::error('Backup destination not writable.');
         }
 
         $engine = new BackupEngine($dest);
@@ -39,8 +38,10 @@ final class BackupCommand
 
         foreach ($sources as $source) {
             \WP_CLI::log("Backing up: {$source->name()}...");
-            $result = $engine->run($source, function ($count, $file) {
-                if ($count % 100 === 0) \WP_CLI::log("  {$count} files processed...");
+            $result = $engine->run($source, function ($count) {
+                if ($count % 100 === 0) {
+                    \WP_CLI::log("  {$count} files processed...");
+                }
             });
             $mb = round($result['bytes'] / 1048576, 2);
             \WP_CLI::success("{$source->name()}: {$result['files']} files, {$mb} MB in {$result['duration']}s");
@@ -55,13 +56,13 @@ final class BackupCommand
      *
      * @when after_wp_load
      */
-    public function list($args, $assoc_args): void
-    {
+    public function list($args, $assoc_args): void {
+        unset($args, $assoc_args);
         $engine = new BackupEngine(new LocalFilesystem());
         $backups = $engine->listBackups();
 
         if (empty($backups)) {
-            \WP_CLI::log("No backups found.");
+            \WP_CLI::log('No backups found.');
             return;
         }
 
@@ -84,25 +85,24 @@ final class BackupCommand
      *
      * @when after_wp_load
      */
-    public function status($args, $assoc_args): void
-    {
+    public function status($args, $assoc_args): void {
+        unset($args, $assoc_args);
         $dest = new LocalFilesystem();
-        \WP_CLI::log("=== Gratis Backup Status ===");
-        \WP_CLI::log("Destination: local filesystem");
-        \WP_CLI::log("Writable: " . ($dest->isAvailable() ? 'yes' : 'NO'));
-        \WP_CLI::log("Path: " . WP_CONTENT_DIR . '/gratis-backups');
+        \WP_CLI::log('=== Gratis Backup Status ===');
+        \WP_CLI::log('Destination: local filesystem');
+        \WP_CLI::log('Writable: ' . ($dest->isAvailable() ? 'yes' : 'NO'));
+        \WP_CLI::log('Path: ' . WP_CONTENT_DIR . '/gratis-backups');
 
         $engine = new BackupEngine($dest);
         $backups = $engine->listBackups();
-        \WP_CLI::log("Backups: " . count($backups));
+        \WP_CLI::log('Backups: ' . count($backups));
 
         if (!empty($backups)) {
-            \WP_CLI::log("Latest: " . ($backups[0]['id'] ?? 'unknown'));
+            \WP_CLI::log('Latest: ' . ($backups[0]['id'] ?? 'unknown'));
         }
     }
 
-    private function sourcesForType(string $type): array
-    {
+    private function sourcesForType(string $type): array {
         return match ($type) {
             'database' => [new DatabaseSource()],
             'uploads'  => [new DirectorySource(WP_CONTENT_DIR . '/uploads', 'uploads', ['gratis-backups/*', 'cache/*'])],
