@@ -52,10 +52,11 @@ final class Settings {
         return max(1, min(365, $keep));
     }
 
-    /** Register the admin-post handlers for run + download actions. */
+    /** Register the admin-post handlers for run + download + restore actions. */
     public static function register_actions(): void {
         add_action('admin_post_gratis_backup_run', [__CLASS__, 'handle_run']);
         add_action('admin_post_gratis_backup_download', [__CLASS__, 'handle_download']);
+        add_action('admin_post_gratis_backup_restore', [__CLASS__, 'handle_restore']);
     }
 
     /** Run an on-demand backup (nonce + capability gated). */
@@ -95,23 +96,154 @@ final class Settings {
         }
 
         $base = WP_CONTENT_DIR . '/gratis-backups/backups/' . $id;
-        $file = $base . '/database.sql';
-        // Resolve the real path and confirm it stays inside the backup directory.
-        $real = realpath($file);
         $root = realpath(WP_CONTENT_DIR . '/gratis-backups/backups');
-        if (false === $real || false === $root || strncmp($real, $root, strlen($root)) !== 0 || !is_file($real)) {
+
+        // A database backup is either a MySQL dump (database.sql) or a SQLite
+        // file copy (database.sqlite). Serve whichever is present.
+        $candidates = [
+            'database.sql'    => 'application/sql',
+            'database.sqlite' => 'application/octet-stream',
+        ];
+        $real  = false;
+        $ctype = 'application/octet-stream';
+        $fname = $id . '-database';
+        foreach ($candidates as $name => $type) {
+            $try = realpath($base . '/' . $name);
+            if (false !== $try && false !== $root && str_starts_with($try, $root . '/') && is_file($try)) {
+                $real  = $try;
+                $ctype = $type;
+                $fname = $id . '-' . $name;
+                break;
+            }
+        }
+        if (false === $real) {
             wp_die(esc_html__('Backup file not found.', 'gratis-backup'));
         }
 
         nocache_headers();
-        header('Content-Type: application/sql');
-        header('Content-Disposition: attachment; filename="' . $id . '-database.sql"');
+        header('Content-Type: ' . $ctype);
+        header('Content-Disposition: attachment; filename="' . $fname . '"');
         header('Content-Length: ' . filesize($real));
 
         // Streaming a local backup file to the browser; WP_Filesystem cannot stream output.
         // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_readfile
         readfile($real);
         exit;
+    }
+
+    /**
+     * Restore (or dry-run verify) a backup — capability + nonce gated, with an
+     * explicit confirmation required for the destructive path.
+     */
+    public static function handle_restore(): void {
+        if (!current_user_can('manage_options')) {
+            wp_die(esc_html__('You do not have permission to restore backups.', 'gratis-backup'));
+        }
+        check_admin_referer('gratis_backup_restore');
+
+        $id        = isset($_POST['id']) ? sanitize_file_name(wp_unslash($_POST['id'])) : '';
+        $dry_run   = isset($_POST['dry_run']) && '1' === sanitize_text_field(wp_unslash($_POST['dry_run']));
+        $confirmed = isset($_POST['confirm']) && 'yes' === sanitize_text_field(wp_unslash($_POST['confirm']));
+
+        if ('' === $id) {
+            self::store_restore_report([__('No backup specified.', 'gratis-backup')]);
+            self::redirect_restore('restore_invalid');
+            return;
+        }
+
+        $engine = new RestoreEngine();
+
+        if ($dry_run) {
+            $plan = $engine->verify($id);
+            self::store_restore_report(self::summarize_plan($plan));
+            self::redirect_restore($plan['ok'] ? 'verified' : 'restore_invalid');
+            return;
+        }
+
+        // Destructive path: require the explicit confirmation checkbox.
+        if (!$confirmed) {
+            self::store_restore_report([__('Tick the confirmation box to run a restore.', 'gratis-backup')]);
+            self::redirect_restore('restore_unconfirmed');
+            return;
+        }
+
+        try {
+            $result = $engine->restore($id);
+        } catch (\Throwable $e) {
+            self::store_restore_report([$e->getMessage()]);
+            self::redirect_restore('restore_failed');
+            return;
+        }
+
+        if (empty($result['restored'])) {
+            self::store_restore_report($result['errors'] ?? [__('Backup is not restorable.', 'gratis-backup')]);
+            self::redirect_restore('restore_invalid');
+            return;
+        }
+
+        self::store_restore_report(self::summarize_result($result));
+        self::redirect_restore('restored');
+    }
+
+    /** Redirect back to the settings page with a status code. */
+    private static function redirect_restore(string $code): void {
+        wp_safe_redirect(add_query_arg(['page' => self::PAGE, 'gratis_backup_msg' => $code], admin_url('tools.php')));
+        exit;
+    }
+
+    /** Stash a short, per-user restore report for display after the redirect. */
+    private static function store_restore_report(array $lines): void {
+        $clean = array_map(static fn($line) => (string) $line, array_slice(array_values($lines), 0, 50));
+        set_transient('gratis_backup_restore_report_' . get_current_user_id(), $clean, 120);
+    }
+
+    /** @return array<int,string> */
+    private static function summarize_plan(array $plan): array {
+        $lines = [];
+        $lines[] = sprintf('Backup: %s (source %s, %s)', (string) $plan['id'], (string) $plan['source'], (string) $plan['created']);
+        if ('database' === ($plan['kind'] ?? '')) {
+            $lines[] = sprintf('Database restore — engine %s, target %s', (string) $plan['db_engine'], (string) ($plan['db']['target'] ?? ''));
+        } elseif ('files' === ($plan['kind'] ?? '')) {
+            $summary = $plan['summary'];
+            $lines[] = sprintf('Target: %s', (string) $plan['target_root']);
+            $lines[] = sprintf(
+                '%d create, %d overwrite, %d unchanged (%d total)',
+                (int) ($summary['create'] ?? 0),
+                (int) ($summary['overwrite'] ?? 0),
+                (int) ($summary['unchanged'] ?? 0),
+                (int) ($summary['files'] ?? 0)
+            );
+        }
+        foreach ((array) ($plan['warnings'] ?? []) as $warning) {
+            $lines[] = 'Warning: ' . (string) $warning;
+        }
+        foreach ((array) ($plan['errors'] ?? []) as $error) {
+            $lines[] = 'Error: ' . (string) $error;
+        }
+        return $lines;
+    }
+
+    /** @return array<int,string> */
+    private static function summarize_result(array $result): array {
+        $plan  = $result['plan'];
+        $lines = [__('Restore complete.', 'gratis-backup')];
+        $lines[] = 'Pre-restore snapshot: ' . (string) ($result['snapshot_dir'] ?? 'n/a');
+        if ('database' === ($plan['kind'] ?? '')) {
+            $lines[] = sprintf('Database restored (%s).', (string) $plan['db_engine']);
+        } else {
+            $applied = (array) ($result['applied'] ?? []);
+            $lines[] = sprintf(
+                'Files: %d created, %d overwritten, %d unchanged, %d failed.',
+                (int) ($applied['create'] ?? 0),
+                (int) ($applied['overwrite'] ?? 0),
+                (int) ($applied['unchanged'] ?? 0),
+                (int) ($applied['failed'] ?? 0)
+            );
+        }
+        foreach ((array) ($result['warnings'] ?? []) as $warning) {
+            $lines[] = 'Warning: ' . (string) $warning;
+        }
+        return $lines;
     }
 
     /** Render the settings screen and backup list. */
@@ -140,6 +272,8 @@ final class Settings {
         } elseif ('error' === $msg) {
             echo '<div class="notice notice-error is-dismissible"><p>' . esc_html__('Backup failed — the backup directory is not writable.', 'gratis-backup') . '</p></div>';
         }
+
+        self::render_restore_notice($msg);
 
         if (!$writable) {
             echo '<div class="notice notice-warning inline"><p>' . esc_html__('The backup directory (wp-content/gratis-backups) is not writable.', 'gratis-backup') . '</p></div>';
@@ -198,6 +332,7 @@ final class Settings {
         echo '</form>';
 
         self::render_backup_list();
+        self::render_restore_panel();
 
         echo '</div>';
     }
@@ -251,6 +386,78 @@ final class Settings {
         }
 
         echo '</tbody></table>';
+    }
+
+    /** Show the result of the most recent restore/verify action (if any). */
+    private static function render_restore_notice(string $msg): void {
+        $headlines = [
+            'restored'            => [__('Restore complete.', 'gratis-backup'), 'notice-success'],
+            'verified'            => [__('Dry run complete — no changes were made.', 'gratis-backup'), 'notice-info'],
+            'restore_invalid'     => [__('Backup could not be restored.', 'gratis-backup'), 'notice-error'],
+            'restore_failed'      => [__('Restore failed. Your data was protected by the pre-restore snapshot.', 'gratis-backup'), 'notice-error'],
+            'restore_unconfirmed' => [__('Restore not run — confirmation required.', 'gratis-backup'), 'notice-warning'],
+        ];
+        if (!isset($headlines[$msg])) {
+            return;
+        }
+        [$headline, $class] = $headlines[$msg];
+
+        $key    = 'gratis_backup_restore_report_' . get_current_user_id();
+        $report = get_transient($key);
+        if (is_array($report)) {
+            delete_transient($key);
+        }
+
+        echo '<div class="notice ' . esc_attr($class) . '"><p><strong>' . esc_html($headline) . '</strong></p>';
+        if (is_array($report) && !empty($report)) {
+            echo '<ul style="list-style:disc;margin-left:20px">';
+            foreach ($report as $line) {
+                echo '<li><code>' . esc_html((string) $line) . '</code></li>';
+            }
+            echo '</ul>';
+        }
+        echo '</div>';
+    }
+
+    /** Render the restore form: pick a backup, verify (dry run) or restore. */
+    private static function render_restore_panel(): void {
+        $engine  = new BackupEngine(new Destination\LocalFilesystem());
+        $backups = $engine->listBackups();
+
+        echo '<h2>' . esc_html__('Restore a backup', 'gratis-backup') . '</h2>';
+        if (empty($backups)) {
+            echo '<p>' . esc_html__('No backups available to restore.', 'gratis-backup') . '</p>';
+            return;
+        }
+
+        echo '<div class="notice notice-warning inline"><p>' . esc_html__('Restoring overwrites current files or the database. A pre-restore snapshot is taken automatically and is never deleted. Use “Verify (dry run)” first.', 'gratis-backup') . '</p></div>';
+
+        echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '">';
+        wp_nonce_field('gratis_backup_restore');
+        echo '<input type="hidden" name="action" value="gratis_backup_restore">';
+        echo '<table class="form-table" role="presentation"><tbody>';
+
+        echo '<tr><th scope="row"><label for="gb_restore_id">' . esc_html__('Backup', 'gratis-backup') . '</label></th><td>';
+        echo '<select id="gb_restore_id" name="id">';
+        foreach ($backups as $b) {
+            $bid = (string) ($b['id'] ?? '');
+            if ('' === $bid) {
+                continue;
+            }
+            $label = sprintf('%s — %s (%s)', $bid, (string) ($b['source'] ?? ''), (string) ($b['created'] ?? ''));
+            echo '<option value="' . esc_attr($bid) . '">' . esc_html($label) . '</option>';
+        }
+        echo '</select></td></tr>';
+
+        echo '<tr><th scope="row">' . esc_html__('Confirmation', 'gratis-backup') . '</th><td><label><input type="checkbox" name="confirm" value="yes"> ' . esc_html__('I understand this overwrites current data.', 'gratis-backup') . '</label></td></tr>';
+
+        echo '</tbody></table>';
+
+        echo '<p>';
+        echo '<button type="submit" name="dry_run" value="1" class="button button-secondary">' . esc_html__('Verify (dry run)', 'gratis-backup') . '</button> ';
+        echo '<button type="submit" name="dry_run" value="0" class="button button-primary">' . esc_html__('Restore now', 'gratis-backup') . '</button>';
+        echo '</p>';
+        echo '</form>';
     }
 
     /** Build the source list for an on-demand backup of the given type. */

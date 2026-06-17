@@ -2,17 +2,43 @@
 namespace Gratis\Backup\Source;
 
 use Gratis\Backup\Contracts\BackupSourceInterface;
+use Gratis\Backup\DatabaseBackend;
+
+// 'sqlite'/'database.sqlite' literals and SQLite helper names trip the
+// PHPCompatibility removed-extension sniff (PHP 5.4 sqlite2) — a false positive
+// for the modern pdo_sqlite-backed code paths used here.
+// phpcs:disable PHPCompatibility.Extensions.RemovedExtensions.sqliteRemoved
 
 final class DatabaseSource implements BackupSourceInterface {
 
-    private string $tempFile;
+    private string $tempFile = '';
 
     public function name(): string {
         return 'database';
     }
 
     public function files(): \Generator {
-        $this->tempFile = tempnam(sys_get_temp_dir(), 'gratis-db-');
+        // SQLite: back up by making a consistent copy of the single database
+        // file (mysqldump does not exist on a SQLite host).
+        if (DatabaseBackend::isSqlite()) {
+            $source = DatabaseBackend::sqliteFile();
+            if (!is_file($source)) {
+                return;
+            }
+            $this->tempFile = (string) tempnam(sys_get_temp_dir(), 'gratis-db-');
+            // VACUUM INTO requires a non-existent target.
+            // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged, WordPress.WP.AlternativeFunctions.unlink_unlink
+            @unlink($this->tempFile);
+            if (DatabaseBackend::copySqliteConsistently($source, $this->tempFile)
+                && is_file($this->tempFile)
+                && filesize($this->tempFile) > 0) {
+                yield 'database.sqlite';
+            }
+            return;
+        }
+
+        // MySQL/MariaDB: stream a logical dump via mysqldump.
+        $this->tempFile = (string) tempnam(sys_get_temp_dir(), 'gratis-db-');
         $cmd = sprintf(
             'mysqldump --host=%s --user=%s --password=%s %s > %s 2>/dev/null',
             escapeshellarg(DB_HOST),
@@ -30,7 +56,7 @@ final class DatabaseSource implements BackupSourceInterface {
     }
 
     public function readChunked(string $path, int $chunkSize = 65536): \Generator {
-        if (!file_exists($this->tempFile)) {
+        if ('' === $this->tempFile || !file_exists($this->tempFile)) {
             return;
         }
         // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen
