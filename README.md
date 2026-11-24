@@ -1,8 +1,8 @@
 # Gratis Backup
 
-Stream-first WordPress backup engine. Part of the [Gratis Suite](https://github.com/juslintek/gratis-suite).
+Stream-first WordPress backup engine. Part of the [Gratis Suite](https://gratis.superglobalsdevelopment.com).
 
-## Features (planned)
+## Features
 - Chunked streaming (never loads full backup into memory)
 - Hash-while-streaming integrity verification
 - Multiple destinations: local, SFTP, S3, Google Drive, Dropbox
@@ -12,8 +12,8 @@ Stream-first WordPress backup engine. Part of the [Gratis Suite](https://github.
 - Pre-update and pre-builder-publish snapshots
 - Integration with cache-manager file-change tracking
 
-## Architecture
-See [gratis-suite/ARCHITECTURE.md](https://github.com/juslintek/gratis-suite/blob/main/ARCHITECTURE.md)
+## Documentation
+See the [Gratis Backup documentation](https://gratis.superglobalsdevelopment.com/docs/gratis-backup/).
 
 ## License
 GPL-2.0-or-later
