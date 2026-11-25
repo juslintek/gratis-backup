@@ -1,6 +1,7 @@
 <?php declare(strict_types=1);
 namespace Gratis\Backup\Destination;
 
+defined('ABSPATH') || exit;
 use Gratis\Backup\Contracts\BackupDestinationInterface;
 
 final class LocalFilesystem implements BackupDestinationInterface {

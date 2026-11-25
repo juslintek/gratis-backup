@@ -1,6 +1,7 @@
 <?php declare(strict_types=1);
 namespace Gratis\Backup;
 
+defined('ABSPATH') || exit;
 /**
  * Scheduled automatic backups via WP-Cron.
  * What UpdraftPlus charges $70/yr for (scheduled cloud backups). Free in Gratis.

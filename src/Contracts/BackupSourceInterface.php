@@ -1,6 +1,7 @@
 <?php declare(strict_types=1);
 namespace Gratis\Backup\Contracts;
 
+defined('ABSPATH') || exit;
 interface BackupSourceInterface {
 
     public function name(): string;
