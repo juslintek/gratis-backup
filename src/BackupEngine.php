@@ -1,6 +1,7 @@
 <?php declare(strict_types=1);
 namespace Gratis\Backup;
 
+defined('ABSPATH') || exit;
 use Gratis\Backup\Contracts\BackupDestinationInterface;
 use Gratis\Backup\Contracts\BackupSourceInterface;
 

@@ -1,6 +1,7 @@
 <?php declare(strict_types=1);
 namespace Gratis\Backup;
 
+defined('ABSPATH') || exit;
 /**
  * Hooks into WordPress update process to create automatic snapshots.
  */
