@@ -38,19 +38,40 @@ final class DatabaseSource implements BackupSourceInterface {
             return;
         }
 
-        // MySQL/MariaDB: stream a logical dump via mysqldump.
+        // MySQL/MariaDB: stream a logical dump via mysqldump without exposing DB_PASSWORD in argv.
+        if (!function_exists('exec')) {
+            return;
+        }
         $this->tempFile = (string) tempnam(sys_get_temp_dir(), 'gratis-db-');
+        $parsed         = DatabaseBackend::parseDbHost(defined('DB_HOST') ? (string) constant('DB_HOST') : 'localhost');
+        $args           = ['--host=' . escapeshellarg($parsed['host'])];
+        if (null !== $parsed['port']) {
+            $args[] = '--port=' . escapeshellarg((string) $parsed['port']);
+        }
+        if (null !== $parsed['socket']) {
+            $args[] = '--socket=' . escapeshellarg($parsed['socket']);
+        }
+        $args[] = '--user=' . escapeshellarg(defined('DB_USER') ? (string) constant('DB_USER') : '');
+
         $cmd = sprintf(
-            'mysqldump --host=%s --user=%s --password=%s %s > %s 2>/dev/null',
-            escapeshellarg(DB_HOST),
-            escapeshellarg(DB_USER),
-            escapeshellarg(DB_PASSWORD),
-            escapeshellarg(DB_NAME),
+            'mysqldump %s %s > %s 2>/dev/null',
+            implode(' ', $args),
+            escapeshellarg(defined('DB_NAME') ? (string) constant('DB_NAME') : ''),
             escapeshellarg($this->tempFile)
         );
-        // mysqldump is the fast path for a streamed SQL backup; all args are shell-escaped.
-        // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.system_calls_exec
-        exec($cmd, $output, $code);
+        $pass   = defined('DB_PASSWORD') ? (string) constant('DB_PASSWORD') : '';
+        $output = [];
+        $code   = 1;
+        // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.runtime_configuration_putenv
+        putenv('MYSQL_PWD=' . $pass);
+        try {
+            // mysqldump is the fast path for a streamed SQL backup; all args are shell-escaped.
+            // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.system_calls_exec
+            exec($cmd, $output, $code);
+        } finally {
+            // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.runtime_configuration_putenv
+            putenv('MYSQL_PWD');
+        }
         if ($code === 0 && filesize($this->tempFile) > 0) {
             yield 'database.sql';
         }
