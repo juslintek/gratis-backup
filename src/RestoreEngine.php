@@ -510,20 +510,32 @@ final class RestoreEngine {
      * file; import reads stdin from the file.
      */
     private function runMysqlClient(string $binary, string $file, bool $isDump): int {
-        $host = defined('DB_HOST') ? (string) constant('DB_HOST') : 'localhost';
-        $user = defined('DB_USER') ? (string) constant('DB_USER') : '';
-        $name = defined('DB_NAME') ? (string) constant('DB_NAME') : '';
-        $pass = defined('DB_PASSWORD') ? (string) constant('DB_PASSWORD') : '';
+        if (!function_exists('exec')) {
+            return 127;
+        }
+        $rawHost = defined('DB_HOST') ? (string) constant('DB_HOST') : 'localhost';
+        $parsed  = DatabaseBackend::parseDbHost($rawHost);
+        $user    = defined('DB_USER') ? (string) constant('DB_USER') : '';
+        $name    = defined('DB_NAME') ? (string) constant('DB_NAME') : '';
+        $pass    = defined('DB_PASSWORD') ? (string) constant('DB_PASSWORD') : '';
+
+        $args = ['--host=' . escapeshellarg($parsed['host'])];
+        if (null !== $parsed['port']) {
+            $args[] = '--port=' . escapeshellarg((string) $parsed['port']);
+        }
+        if (null !== $parsed['socket']) {
+            $args[] = '--socket=' . escapeshellarg($parsed['socket']);
+        }
+        $args[] = '--user=' . escapeshellarg($user);
 
         $redirect = $isDump
             ? '> ' . escapeshellarg($file) . ' 2>/dev/null'
             : '< ' . escapeshellarg($file) . ' 2>/dev/null';
 
         $cmd = sprintf(
-            '%s --host=%s --user=%s %s %s',
+            '%s %s %s %s',
             escapeshellcmd($binary),
-            escapeshellarg($host),
-            escapeshellarg($user),
+            implode(' ', $args),
             escapeshellarg($name),
             $redirect
         );
@@ -531,12 +543,15 @@ final class RestoreEngine {
         // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.runtime_configuration_putenv
         putenv('MYSQL_PWD=' . $pass);
         $output = [];
-        $code = 0;
-        // mysql/mysqldump is the symmetric tool for a mysqldump archive; args are shell-escaped.
-        // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.system_calls_exec
-        exec($cmd, $output, $code);
-        // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.runtime_configuration_putenv
-        putenv('MYSQL_PWD');
+        $code   = 1;
+        try {
+            // mysql/mysqldump is the symmetric tool for a mysqldump archive; args are shell-escaped.
+            // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.system_calls_exec
+            exec($cmd, $output, $code);
+        } finally {
+            // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.runtime_configuration_putenv
+            putenv('MYSQL_PWD');
+        }
         return (int) $code;
     }
 

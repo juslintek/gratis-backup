@@ -151,4 +151,55 @@ final class DatabaseBackend {
             return false;
         }
     }
+
+    /**
+     * Split a WordPress DB_HOST value into host, optional TCP port, and optional
+     * Unix socket path (handles plain hosts, host:port, host:/path.sock, and
+     * bracketed IPv6 like [::1]:3306).
+     *
+     * @return array{host:string,port:?int,socket:?string}
+     */
+    public static function parseDbHost(string $raw): array {
+        $raw = trim($raw);
+        if ('' === $raw) {
+            return ['host' => 'localhost', 'port' => null, 'socket' => null];
+        }
+
+        $host   = $raw;
+        $port   = null;
+        $socket = null;
+
+        if (str_starts_with($raw, '[')) {
+            $end = strpos($raw, ']');
+            if (false !== $end) {
+                $host = substr($raw, 1, $end - 1);
+                $rest = substr($raw, $end + 1);
+                if (str_starts_with($rest, ':')) {
+                    $tail = substr($rest, 1);
+                    if (ctype_digit($tail)) {
+                        $port = (int) $tail;
+                    } elseif ('' !== $tail) {
+                        $socket = $tail;
+                    }
+                }
+            }
+        } else {
+            $colon = strpos($raw, ':');
+            if (false !== $colon) {
+                $host = substr($raw, 0, $colon);
+                $tail = substr($raw, $colon + 1);
+                if (ctype_digit($tail)) {
+                    $port = (int) $tail;
+                } elseif ('' !== $tail) {
+                    $socket = $tail;
+                }
+            }
+        }
+
+        return [
+            'host'   => '' !== $host ? $host : 'localhost',
+            'port'   => $port,
+            'socket' => $socket,
+        ];
+    }
 }

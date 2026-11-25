@@ -87,6 +87,24 @@ $check(
     DatabaseBackend::sqliteFile() === rtrim(WP_CONTENT_DIR, '/') . '/database/.ht.sqlite'
 );
 
+// --- DB_HOST parsing ---------------------------------------------------
+$check(
+    'parseDbHost plain host',
+    ['host' => 'db.internal', 'port' => null, 'socket' => null] === DatabaseBackend::parseDbHost('db.internal')
+);
+$check(
+    'parseDbHost host:port',
+    ['host' => '127.0.0.1', 'port' => 3307, 'socket' => null] === DatabaseBackend::parseDbHost('127.0.0.1:3307')
+);
+$check(
+    'parseDbHost unix socket',
+    ['host' => 'localhost', 'port' => null, 'socket' => '/var/run/mysqld/mysqld.sock'] === DatabaseBackend::parseDbHost('localhost:/var/run/mysqld/mysqld.sock')
+);
+$check(
+    'parseDbHost bracketed IPv6 with port',
+    ['host' => '::1', 'port' => 3306, 'socket' => null] === DatabaseBackend::parseDbHost('[::1]:3306')
+);
+
 // --- SQLite consistent copy + integrity (when a driver is present) ------
 if (DatabaseBackend::hasPdoSqlite()) {
     $src = $tmp . '/src.sqlite';
